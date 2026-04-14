@@ -20,10 +20,10 @@ import numpy as np
 #   zeta  -> razao de amortecimento
 #   label -> classe numerica usada no treinamento
 MATERIAIS = {
-    "A\u00e7o": {"E": 200e9, "rho": 7850, "zeta": 0.010, "label": 0},
-    "Alum\u00ednio": {"E": 70e9, "rho": 2700, "zeta": 0.015, "label": 1},
-    "Tit\u00e2nio": {"E": 110e9, "rho": 4500, "zeta": 0.008, "label": 2},
-    "Fibra de Carbono": {"E": 150e9, "rho": 1600, "zeta": 0.020, "label": 3},
+    "Aco": {"E": 200e9, "rho": 7850, "zeta": 0.05, "label": 0},
+    "Aluminio": {"E": 70e9, "rho": 2700, "zeta": 0.05, "label": 1},
+    "Titanio": {"E": 110e9, "rho": 4500, "zeta": 0.05, "label": 2},
+    "Fibra de Carbono": {"E": 150e9, "rho": 1600, "zeta": 0.05, "label": 3},
 }
 
 
@@ -36,7 +36,7 @@ I_sec = b * h**3 / 12
 
 
 # Constante modal do primeiro modo de uma viga engastada-livre.
-BETA_MODO_1 = 1.875104068711961
+BETA_MODO_1 = 1.875
 
 
 # Atalhos usados pelo restante do projeto.
@@ -73,7 +73,7 @@ def frequencia_natural(E, rho):
     return (BETA_MODO_1**2) * np.sqrt(rigidez_flexao / (massa_linear * L**4))
 
 
-def resposta_modal_livre(omega_n, zeta, t, q0=1.0, dq0=0.0):
+def resposta_modal_livre(omega_n, zeta, t, x0=1.0, v0=0.0):
     """
     Gera a resposta amortecida de um sistema de um grau de liberdade.
 
@@ -94,9 +94,9 @@ def resposta_modal_livre(omega_n, zeta, t, q0=1.0, dq0=0.0):
         Razao de amortecimento.
     t : array
         Vetor de tempo.
-    q0 : float
+    x0 : float
         Deslocamento inicial.
-    dq0 : float
+    v0 : float
         Velocidade inicial.
 
     Retorna
@@ -107,8 +107,8 @@ def resposta_modal_livre(omega_n, zeta, t, q0=1.0, dq0=0.0):
     zeta_eff = np.clip(zeta, 0.0, 0.999999)
     omega_d = omega_n * np.sqrt(max(1.0 - zeta_eff**2, 1e-12))
     envelope = np.exp(-zeta_eff * omega_n * t)
-    termo_seno = (dq0 + zeta_eff * omega_n * q0) / omega_d
-    return envelope * (q0 * np.cos(omega_d * t) + termo_seno * np.sin(omega_d * t))
+    termo_seno = (v0 + zeta_eff * omega_n * x0) / omega_d
+    return envelope * (x0 * np.cos(omega_d * t) + termo_seno * np.sin(omega_d * t))
 
 
 def simular_vibracao(E, rho, zeta, t, A0=1.0):
@@ -138,7 +138,7 @@ def simular_vibracao(E, rho, zeta, t, A0=1.0):
         Sinal de vibracao livre amortecida.
     """
     omega_n = frequencia_natural(E, rho)
-    return resposta_modal_livre(omega_n, zeta, t, q0=A0, dq0=0.0)
+    return resposta_modal_livre(omega_n, zeta, t, x0=A0, v0=0.0)
 
 
 def extrair_features(sinal, t):
@@ -236,10 +236,10 @@ def gerar_dataset(n_por_classe=250, seed=42):
     for props in MATERIAIS.values():
         for _ in range(n_por_classe):
             # Pequenas variacoes deixam o dataset menos artificial.
-            E_v = props["E"] * np.random.uniform(0.95, 1.05)
+            E_v = props["E"]
             rho_v = props["rho"] * np.random.uniform(0.95, 1.05)
-            zeta_v = props["zeta"] * np.random.uniform(0.90, 1.10)
-            A0_v = np.random.uniform(0.8, 1.2)
+            zeta_v = props["zeta"]
+            A0_v = np.random.uniform(1, 1.1)
 
             sinal = simular_vibracao(E_v, rho_v, zeta_v, t, A0=A0_v)
             features = extrair_features(sinal, t)
