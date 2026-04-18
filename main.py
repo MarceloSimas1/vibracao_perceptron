@@ -1,3 +1,5 @@
+import argparse
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -14,7 +16,13 @@ from perceptron import (
     metricas_por_classe,
     normalizar,
     prever,
-    treinar_multiclasse,
+)
+from visualizacao_perceptron import (
+    imprimir_tabela_resumo_treino,
+    plotar_fronteira_decisao,
+    plotar_metricas,
+    plotar_trajetoria_pesos,
+    treinar_multiclasse_com_historico,
 )
 
 
@@ -32,7 +40,18 @@ from perceptron import (
 #   7. gera os graficos finais.
 
 
-def plotar_resultados(historicos, y_real, y_pred):
+NOMES_FEATURES = [
+    "RMS",
+    "Pico",
+    "Fat. Crista",
+    "Freq. Dom.",
+    "Decaimento",
+    "Energia Esp.",
+]
+INDICES_PESOS_TRAJETORIA = (0, 1)
+
+
+def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
     """
     Gera os graficos finais do experimento.
 
@@ -98,12 +117,14 @@ def plotar_resultados(historicos, y_real, y_pred):
         y=0.98,
     )
     fig.subplots_adjust(top=0.84, bottom=0.12, wspace=0.35)
-    plt.savefig("resultados_perceptron_viga.png", dpi=150, bbox_inches="tight")
-    plt.show()
-    print("\n  Grafico salvo em 'resultados_perceptron_viga.png'")
+    salvar_ou_mostrar(
+        fig,
+        "resultados_perceptron_viga.png",
+        mostrar_graficos=mostrar_graficos,
+    )
 
 
-def plotar_sinais_exemplo():
+def plotar_sinais_exemplo(mostrar_graficos=False):
     """
     Plota um sinal representativo para cada material da base.
 
@@ -138,12 +159,37 @@ def plotar_sinais_exemplo():
         ax.grid(True, alpha=0.3)
 
     fig.tight_layout(rect=(0, 0, 1, 0.96))
-    plt.savefig("sinais_vibracao.png", dpi=150, bbox_inches="tight")
-    plt.show()
-    print("  Grafico salvo em 'sinais_vibracao.png'")
+    salvar_ou_mostrar(fig, "sinais_vibracao.png", mostrar_graficos=mostrar_graficos)
 
 
-def main():
+def salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=False):
+    """
+    Salva a figura e, opcionalmente, abre a janela interativa.
+
+    Por padrao o script roda de forma nao bloqueante, apenas gerando
+    os arquivos PNG. A exibicao interativa pode ser habilitada via CLI.
+    """
+    fig.savefig(caminho_arquivo, dpi=150, bbox_inches="tight")
+    if mostrar_graficos:
+        plt.show()
+    else:
+        plt.close(fig)
+    print(f"  Grafico salvo em '{caminho_arquivo}'")
+
+
+def criar_parser():
+    parser = argparse.ArgumentParser(
+        description="Classifica materiais de uma viga engastada a partir de sinais de vibracao."
+    )
+    parser.add_argument(
+        "--mostrar-graficos",
+        action="store_true",
+        help="abre as janelas do Matplotlib apos salvar os arquivos PNG",
+    )
+    return parser
+
+
+def main(mostrar_graficos=False):
     """
     Orquestra o experimento completo de classificacao.
 
@@ -164,12 +210,12 @@ def main():
     print("=" * 58)
 
     print("\n[0] Gerando sinais de vibracao por material...")
-    plotar_sinais_exemplo()
+    plotar_sinais_exemplo(mostrar_graficos=mostrar_graficos)
 
     print("\n[1] Gerando dataset simulado (250 amostras x 4 materiais)...")
     X, y = gerar_dataset(n_por_classe=250)
     print(f"    Total: {X.shape[0]} amostras  |  {X.shape[1]} features por amostra")
-    print("    Features: RMS, Pico, Fat. Crista, Freq. Dom., Decaimento, Energia Esp.")
+    print(f"    Features: {', '.join(NOMES_FEATURES)}")
 
     # Embaralha o dataset e separa treino/teste em 80/20.
     np.random.seed(0)
@@ -183,7 +229,7 @@ def main():
     X_tr_n, X_te_n, _, _ = normalizar(X_tr, X_te)
 
     # Treina um classificador um-contra-todos para cada material.
-    modelos, historicos = treinar_multiclasse(
+    modelos, historicos, historicos_detalhados = treinar_multiclasse_com_historico(
         X_tr_n,
         y_tr,
         nomes=NOMES,
@@ -211,8 +257,51 @@ def main():
             f"  {p_alvo:>14.1f}%  {p_nao_alvo:>18.1f}%"
         )
 
-    print("\n[4] Gerando visualizacoes...")
-    plotar_resultados(historicos, y_te, y_pred)
+    print("\n[4] Resumo do treino no terminal...")
+    imprimir_tabela_resumo_treino(
+        historicos_detalhados,
+        nomes=NOMES,
+        indices_pesos=INDICES_PESOS_TRAJETORIA,
+        nomes_features=NOMES_FEATURES,
+    )
+
+    print("\n[5] Gerando visualizacoes...")
+    plotar_resultados(historicos, y_te, y_pred, mostrar_graficos=mostrar_graficos)
+    plotar_metricas(
+        historicos_detalhados,
+        nomes=NOMES,
+        titulo="Metricas do treinamento por classe",
+        caminho_arquivo="metricas_treinamento.png",
+        mostrar_graficos=mostrar_graficos,
+    )
+
+    for nome, hist_det in zip(NOMES, historicos_detalhados):
+        nome_arquivo = nome.lower().replace(" ", "_")
+        plotar_trajetoria_pesos(
+            hist_det,
+            indices_pesos=INDICES_PESOS_TRAJETORIA,
+            nomes_features=NOMES_FEATURES,
+            titulo=f"Trajetoria dos pesos - {nome}",
+            caminho_arquivo=f"trajetoria_pesos_{nome_arquivo}.png",
+            mostrar_graficos=mostrar_graficos,
+        )
+
+    if X_tr_n.shape[1] == 2:
+        for classe, ((w0, w), nome) in enumerate(zip(modelos, NOMES)):
+            r_bin = (y_tr == classe).astype(int)
+            nome_arquivo = nome.lower().replace(" ", "_")
+            plotar_fronteira_decisao(
+                X_tr_n,
+                r_bin,
+                w0,
+                w,
+                nomes_features=NOMES_FEATURES[:2],
+                titulo=f"Fronteira de decisao - {nome} vs resto",
+                caminho_arquivo=f"fronteira_decisao_{nome_arquivo}.png",
+                mostrar_graficos=mostrar_graficos,
+            )
+    else:
+        print("  Fronteira de decisao nao gerada: o dataset atual possui mais de 2 features.")
 
     print("\n" + "=" * 58)
     print("  Concluido. Verifique os arquivos .png gerados.")
@@ -220,4 +309,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = criar_parser().parse_args()
+    main(mostrar_graficos=args.mostrar_graficos)

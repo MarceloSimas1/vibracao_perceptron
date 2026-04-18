@@ -131,7 +131,57 @@ def gradiente(w0, w, X, r):
     return grad_w0, grad_w
 
 
-def treinar_perceptron(X_tr, r_tr, delta=1e-3, n_iter=150, nome=""):
+def _criar_historico_detalhado():
+    """
+    Inicializa a estrutura usada para guardar o estado do treino.
+
+    Cada lista recebe um valor por estado visitado pelo algoritmo:
+    - estado inicial;
+    - estado apos cada iteracao aceita.
+    """
+    return {
+        "epocas": [],
+        "custos": [],
+        "w0": [],
+        "w": [],
+        "gradiente": [],
+        "grad_w0": [],
+        "grad_w": [],
+        "norma_gradiente": [],
+    }
+
+
+def _registrar_estado_treino(historico, epoca, w0, w, X, r, custo=None):
+    """
+    Registra custo, pesos e gradiente de um estado especifico do treino.
+
+    O gradiente e recalculado no proprio ponto salvo, o que deixa o
+    historico consistente para analise e visualizacao.
+    """
+    if custo is None:
+        custo = custo_total(w0, w, X, r)
+
+    grad_w0, grad_w = gradiente(w0, w, X, r)
+    norma_gradiente = np.sqrt(grad_w0**2 + np.sum(grad_w**2))
+
+    historico["epocas"].append(int(epoca))
+    historico["custos"].append(float(custo))
+    historico["w0"].append(float(w0))
+    historico["w"].append(np.array(w, copy=True))
+    historico["gradiente"].append(np.concatenate(([grad_w0], grad_w)))
+    historico["grad_w0"].append(float(grad_w0))
+    historico["grad_w"].append(np.array(grad_w, copy=True))
+    historico["norma_gradiente"].append(float(norma_gradiente))
+
+
+def treinar_perceptron(
+    X_tr,
+    r_tr,
+    delta=1e-3,
+    n_iter=150,
+    nome="",
+    coletar_detalhes=True,
+):
     """
     Treina um classificador binario por descida de gradiente.
 
@@ -160,11 +210,18 @@ def treinar_perceptron(X_tr, r_tr, delta=1e-3, n_iter=150, nome=""):
         Numero maximo de iteracoes.
     nome : str
         Nome da classe, usado apenas na impressao do log.
+    coletar_detalhes : bool
+        Se verdadeiro, retorna tambem pesos, vies, gradiente e custo
+        salvos ao longo do treino.
 
     Retorna
     -------
     tuple
-        Vies treinado, vetor de pesos e historico do custo.
+        Se `coletar_detalhes=False`:
+            vies treinado, vetor de pesos e historico do custo.
+        Se `coletar_detalhes=True`:
+            vies treinado, vetor de pesos, historico do custo e
+            historico detalhado do treino.
     """
     _, n_features = X_tr.shape
     w0 = 0.0
@@ -172,8 +229,20 @@ def treinar_perceptron(X_tr, r_tr, delta=1e-3, n_iter=150, nome=""):
 
     # O historico permite acompanhar se a otimizacao esta melhorando.
     hist = [custo_total(w0, w, X_tr, r_tr)]
+    historico_detalhado = _criar_historico_detalhado() if coletar_detalhes else None
 
-    for _ in range(n_iter):
+    if coletar_detalhes:
+        _registrar_estado_treino(
+            historico_detalhado,
+            epoca=0,
+            w0=w0,
+            w=w,
+            X=X_tr,
+            r=r_tr,
+            custo=hist[0],
+        )
+
+    for epoca in range(1, n_iter + 1):
         gw0, gw = gradiente(w0, w, X_tr, r_tr)
 
         # Propoe um novo conjunto de pesos.
@@ -191,11 +260,31 @@ def treinar_perceptron(X_tr, r_tr, delta=1e-3, n_iter=150, nome=""):
         w0, w = w0_new, w_new
         hist.append(c_new)
 
+        if coletar_detalhes:
+            _registrar_estado_treino(
+                historico_detalhado,
+                epoca=epoca,
+                w0=w0,
+                w=w,
+                X=X_tr,
+                r=r_tr,
+                custo=c_new,
+            )
+
     print(f"  [{nome:<18}] Custo inicial: {hist[0]:>10.1f}  -> final: {hist[-1]:>8.1f}")
+    if coletar_detalhes:
+        return w0, w, hist, historico_detalhado
     return w0, w, hist
 
 
-def treinar_multiclasse(X_tr, y_tr, nomes=None, delta=1e-3, n_iter=150):
+def treinar_multiclasse(
+    X_tr,
+    y_tr,
+    nomes=None,
+    delta=1e-3,
+    n_iter=150,
+    coletar_detalhes=False,
+):
     """
     Treina um modelo binario para cada classe no esquema um-contra-todos.
 
@@ -210,10 +299,15 @@ def treinar_multiclasse(X_tr, y_tr, nomes=None, delta=1e-3, n_iter=150):
     Retorna
     -------
     tuple
-        Lista de modelos e lista dos historicos de custo.
+        Se `coletar_detalhes=False`:
+            lista de modelos e lista dos historicos de custo.
+        Se `coletar_detalhes=True`:
+            lista de modelos, lista dos historicos de custo e lista dos
+            historicos detalhados de cada classificador.
     """
     modelos = []
     historicos = []
+    historicos_detalhados = []
     n_classes = int(np.max(y_tr)) + 1
 
     print("\n=== TREINAMENTO - UM-CONTRA-TODOS ===")
@@ -224,16 +318,29 @@ def treinar_multiclasse(X_tr, y_tr, nomes=None, delta=1e-3, n_iter=150):
         # Cria o rotulo binario para a classe atual.
         r_bin = (y_tr == c).astype(int)
 
-        w0, w, hist = treinar_perceptron(
-            X_tr,
-            r_bin,
-            delta=delta,
-            n_iter=n_iter,
-            nome=nome,
-        )
+        if coletar_detalhes:
+            w0, w, hist, hist_det = treinar_perceptron(
+                X_tr,
+                r_bin,
+                delta=delta,
+                n_iter=n_iter,
+                nome=nome,
+                coletar_detalhes=True,
+            )
+            historicos_detalhados.append(hist_det)
+        else:
+            w0, w, hist = treinar_perceptron(
+                X_tr,
+                r_bin,
+                delta=delta,
+                n_iter=n_iter,
+                nome=nome,
+            )
         modelos.append((w0, w))
         historicos.append(hist)
 
+    if coletar_detalhes:
+        return modelos, historicos, historicos_detalhados
     return modelos, historicos
 
 
