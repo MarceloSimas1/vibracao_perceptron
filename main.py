@@ -19,9 +19,10 @@ from perceptron import (
 )
 from visualizacao_perceptron import (
     imprimir_tabela_resumo_treino,
+    plotar_componentes_gradiente,
+    plotar_evolucao_pesos,
     plotar_fronteira_decisao,
     plotar_metricas,
-    plotar_trajetoria_pesos,
     treinar_multiclasse_com_historico,
 )
 
@@ -48,7 +49,7 @@ NOMES_FEATURES = [
     "Decaimento",
     "Energia Esp.",
 ]
-INDICES_PESOS_TRAJETORIA = (0, 1)
+INDICES_PESOS_RESUMO = (0, 1)
 
 
 def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
@@ -79,7 +80,9 @@ def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
     # Painel 1: mostra se o custo caiu durante o treinamento.
     for i, hist in enumerate(historicos):
         ax1.semilogy(hist, label=NOMES[i], color=cores[i], linewidth=2)
-    ax1.set_title("Evolucao do Custo Total (escala log)", fontsize=12, fontweight="bold")
+    ax1.set_title(
+        "Evolucao do Custo Total (escala log)", fontsize=12, fontweight="bold"
+    )
     ax1.set_xlabel("Iteracao", fontsize=10)
     ax1.set_ylabel("Custo C", fontsize=10)
     ax1.legend(fontsize=9)
@@ -94,7 +97,9 @@ def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
     ax2.set_yticklabels(NOMES, fontsize=9)
     ax2.set_xlabel("Classe Prevista", fontsize=10)
     ax2.set_ylabel("Classe Real", fontsize=10)
-    ax2.set_title("Matriz de Confusao - Conjunto de Teste", fontsize=12, fontweight="bold")
+    ax2.set_title(
+        "Matriz de Confusao - Conjunto de Teste", fontsize=12, fontweight="bold"
+    )
 
     limiar = matriz.max() / 2 if matriz.size else 0
     for i in range(N_CLASSES):
@@ -233,8 +238,8 @@ def main(mostrar_graficos=False):
         X_tr_n,
         y_tr,
         nomes=NOMES,
-        delta=5e-4,
-        n_iter=150,
+        delta=1e-3,
+        n_iter=5000,
     )
 
     print("\n[3] Avaliando no conjunto de teste...")
@@ -261,7 +266,7 @@ def main(mostrar_graficos=False):
     imprimir_tabela_resumo_treino(
         historicos_detalhados,
         nomes=NOMES,
-        indices_pesos=INDICES_PESOS_TRAJETORIA,
+        indices_pesos=INDICES_PESOS_RESUMO,
         nomes_features=NOMES_FEATURES,
     )
 
@@ -277,12 +282,18 @@ def main(mostrar_graficos=False):
 
     for nome, hist_det in zip(NOMES, historicos_detalhados):
         nome_arquivo = nome.lower().replace(" ", "_")
-        plotar_trajetoria_pesos(
+        plotar_evolucao_pesos(
             hist_det,
-            indices_pesos=INDICES_PESOS_TRAJETORIA,
             nomes_features=NOMES_FEATURES,
-            titulo=f"Trajetoria dos pesos - {nome}",
-            caminho_arquivo=f"trajetoria_pesos_{nome_arquivo}.png",
+            titulo=f"Evolucao dos pesos - {nome}",
+            caminho_arquivo=f"evolucao_pesos_{nome_arquivo}.png",
+            mostrar_graficos=mostrar_graficos,
+        )
+        plotar_componentes_gradiente(
+            hist_det,
+            nomes_features=NOMES_FEATURES,
+            titulo=f"Componentes do gradiente - {nome}",
+            caminho_arquivo=f"componentes_gradiente_{nome_arquivo}.png",
             mostrar_graficos=mostrar_graficos,
         )
 
@@ -301,7 +312,9 @@ def main(mostrar_graficos=False):
                 mostrar_graficos=mostrar_graficos,
             )
     else:
-        print("  Fronteira de decisao nao gerada: o dataset atual possui mais de 2 features.")
+        print(
+            "  Fronteira de decisao nao gerada: o dataset atual possui mais de 2 features."
+        )
 
     print("\n" + "=" * 58)
     print("  Concluido. Verifique os arquivos .png gerados.")

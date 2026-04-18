@@ -89,46 +89,83 @@ def plotar_metricas(
     return fig, (ax_custo, ax_grad)
 
 
-def plotar_trajetoria_pesos(
+def plotar_componentes_gradiente(
     historico,
-    indices_pesos=(0, 1),
     nomes_features=None,
-    titulo="Trajetoria no espaco de pesos",
+    incluir_vies=True,
+    titulo="Componentes do gradiente",
     caminho_arquivo=None,
     mostrar_graficos=False,
 ):
     """
-    Plota a trajetoria de dois pesos escolhidos ao longo do treino.
+    Plota cada componente do gradiente ao longo das epocas.
+
+    Esse grafico complementa a norma do gradiente, permitindo observar
+    sinal, magnitude e ritmo de convergencia de cada derivada parcial.
     """
+    epocas = np.asarray(historico["epocas"])
+    grad_w = np.asarray(historico["grad_w"])
+
+    if grad_w.ndim != 2:
+        raise ValueError("O historico de gradientes precisa ter shape (epocas, n_features).")
+
+    nomes_componentes = _resolver_nomes_features(grad_w.shape[1], nomes_features)
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+
+    if incluir_vies:
+        grad_w0 = np.asarray(historico["grad_w0"])
+        ax.plot(epocas, grad_w0, linewidth=2.2, label="grad w0")
+
+    for indice, nome in enumerate(nomes_componentes):
+        ax.plot(epocas, grad_w[:, indice], linewidth=1.8, label=f"grad {nome}")
+
+    ax.axhline(0.0, color="black", linewidth=1.0, alpha=0.45)
+    ax.set_title(titulo)
+    ax.set_xlabel("Epoca")
+    ax.set_ylabel("Valor da derivada")
+    ax.grid(True, alpha=0.3)
+    ax.legend(ncol=2 if len(nomes_componentes) <= 5 else 3, fontsize=9)
+
+    fig.tight_layout()
+    _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    return fig, ax
+
+
+def plotar_evolucao_pesos(
+    historico,
+    nomes_features=None,
+    incluir_vies=True,
+    titulo="Evolucao dos pesos",
+    caminho_arquivo=None,
+    mostrar_graficos=False,
+):
+    """
+    Plota todos os pesos ao longo das epocas.
+
+    Diferente da trajetoria 2D, este grafico mostra explicitamente como
+    cada parametro evolui durante o treinamento.
+    """
+    epocas = np.asarray(historico["epocas"])
     pesos = np.asarray(historico["w"])
-    idx_i, idx_j = indices_pesos
 
     if pesos.ndim != 2:
         raise ValueError("O historico de pesos precisa ter shape (epocas, n_features).")
-    if idx_i == idx_j:
-        raise ValueError("Escolha dois pesos diferentes para a trajetoria 2D.")
-    if idx_i < 0 or idx_j < 0 or idx_i >= pesos.shape[1] or idx_j >= pesos.shape[1]:
-        raise IndexError("Indices de pesos fora do intervalo valido.")
 
-    nomes_eixos = _resolver_nomes_features(pesos.shape[1], nomes_features)
-    traj_x = pesos[:, idx_i]
-    traj_y = pesos[:, idx_j]
+    nomes_componentes = _resolver_nomes_features(pesos.shape[1], nomes_features)
+    fig, ax = plt.subplots(figsize=(9, 5.5))
 
-    fig, ax = plt.subplots(figsize=(6.5, 5.5))
-    ax.plot(traj_x, traj_y, color="#1f77b4", linewidth=1.8)
-    ax.scatter(traj_x[0], traj_y[0], color="#2ca02c", s=70, label="Inicio", zorder=3)
-    ax.scatter(traj_x[-1], traj_y[-1], color="#d62728", s=70, label="Fim", zorder=3)
+    if incluir_vies:
+        vies = np.asarray(historico["w0"])
+        ax.plot(epocas, vies, linewidth=2.2, label="w0")
 
-    for k, (x_k, y_k) in enumerate(zip(traj_x, traj_y)):
-        if k in (0, len(traj_x) - 1):
-            continue
-        ax.scatter(x_k, y_k, color="#1f77b4", s=16, alpha=0.55)
+    for indice, nome in enumerate(nomes_componentes):
+        ax.plot(epocas, pesos[:, indice], linewidth=1.8, label=nome)
 
     ax.set_title(titulo)
-    ax.set_xlabel(nomes_eixos[idx_i])
-    ax.set_ylabel(nomes_eixos[idx_j])
+    ax.set_xlabel("Epoca")
+    ax.set_ylabel("Valor do parametro")
     ax.grid(True, alpha=0.3)
-    ax.legend()
+    ax.legend(ncol=2 if len(nomes_componentes) <= 5 else 3, fontsize=9)
 
     fig.tight_layout()
     _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
@@ -358,9 +395,10 @@ def _salvar_figura(fig, caminho_arquivo, mostrar_graficos=False):
 __all__ = [
     "imprimir_tabela_epocas",
     "imprimir_tabela_resumo_treino",
+    "plotar_componentes_gradiente",
+    "plotar_evolucao_pesos",
     "plotar_fronteira_decisao",
     "plotar_metricas",
-    "plotar_trajetoria_pesos",
     "treinar_com_historico",
     "treinar_multiclasse_com_historico",
 ]
