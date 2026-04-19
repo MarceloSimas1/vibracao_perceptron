@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from vib.modelo_matematico import gerar_dataset; from vib.perceptron import treinar_multiclasse, normalizar; from vib.visualizacao import salvar_ou_mostrar; print\\('Imports OK'\\)\")",
+      "Bash(pip show *)",
+      "Bash(pip install *)"
+    ]
+  }
+}

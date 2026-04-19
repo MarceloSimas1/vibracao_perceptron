@@ -228,18 +228,19 @@ def gerar_dataset(n_por_classe=250, seed=42):
         X com shape (n_total, 6) e y com os rotulos das classes.
     """
     np.random.seed(seed)
-    t = np.linspace(0, 1.0, 1000)
+    t = np.linspace(0, 3.0, 1000)
 
     X_lista = []
     y_lista = []
 
     for props in MATERIAIS.values():
         for _ in range(n_por_classe):
-            # Pequenas variacoes deixam o dataset menos artificial.
-            E_v = props["E"]
-            rho_v = props["rho"] * np.random.uniform(0.95, 1.05)
-            zeta_v = props["zeta"]
-            A0_v = np.random.uniform(1, 1.1)
+            # Perturbacao de +-5% em E e rho e +-10% em zeta e A0
+            # para refletir tolerancias de fabricacao e condicoes de ensaio.
+            E_v    = props["E"]    * np.random.uniform(0.95, 1.05)
+            rho_v  = props["rho"]  * np.random.uniform(0.95, 1.05)
+            zeta_v = props["zeta"] * np.random.uniform(0.90, 1.10)
+            A0_v   = np.random.uniform(0.90, 1.10)
 
             sinal = simular_vibracao(E_v, rho_v, zeta_v, t, A0=A0_v)
             features = extrair_features(sinal, t)

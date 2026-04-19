@@ -1,9 +1,10 @@
 import argparse
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from modelo_matematico import (
+from vib.modelo_matematico import (
     MATERIAIS,
     N_CLASSES,
     NOMES,
@@ -11,19 +12,21 @@ from modelo_matematico import (
     gerar_dataset,
     simular_vibracao,
 )
-from perceptron import (
+from vib.perceptron import (
     matriz_confusao,
     metricas_por_classe,
     normalizar,
     prever,
+    treinar_multiclasse,
 )
-from visualizacao_perceptron import (
+from vib.visualizacao import (
     imprimir_tabela_resumo_treino,
     plotar_componentes_gradiente,
     plotar_evolucao_pesos,
     plotar_fronteira_decisao,
+    plotar_gradiente_3d,
     plotar_metricas,
-    treinar_multiclasse_com_historico,
+    salvar_ou_mostrar,
 )
 
 
@@ -49,35 +52,51 @@ NOMES_FEATURES = [
     "Decaimento",
     "Energia Esp.",
 ]
+
 INDICES_PESOS_RESUMO = (0, 1)
+PASTA_RESULTADOS = "resultados"
+N_POR_CLASSE = 250
+FRACAO_TREINO = 0.8
+DELTA = 1e-4
+N_ITER = 10000
 
 
-def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
-    """
-    Gera os graficos finais do experimento.
+def _desenhar_matriz(ax, matriz, titulo):
+    im = ax.imshow(matriz, cmap="Blues")
+    ax.set_xticks(range(N_CLASSES))
+    ax.set_yticks(range(N_CLASSES))
+    ax.set_xticklabels(NOMES, rotation=18, ha="right", fontsize=9)
+    ax.set_yticklabels(NOMES, fontsize=9)
+    ax.set_xlabel("Classe Prevista", fontsize=10)
+    ax.set_ylabel("Classe Real", fontsize=10)
+    ax.set_title(titulo, fontsize=11, fontweight="bold")
+    limiar = matriz.max() / 2 if matriz.size else 0
+    for i in range(N_CLASSES):
+        for j in range(N_CLASSES):
+            ax.text(
+                j,
+                i,
+                str(matriz[i, j]),
+                ha="center",
+                va="center",
+                fontsize=11,
+                color="white" if matriz[i, j] > limiar else "black",
+            )
+    return im
 
-    Este relatorio visual possui duas partes:
-    1. curva do custo total ao longo do treino para cada classe;
-    2. matriz de confusao no conjunto de teste.
 
-    Papel no projeto:
-    - e chamada no final de `main`;
-    - usa `matriz_confusao` do modulo `perceptron.py`.
-
-    Parametros
-    ----------
-    historicos : list
-        Historico do custo para cada classificador binario.
-    y_real : np.ndarray
-        Rotulos reais do conjunto de teste.
-    y_pred : np.ndarray
-        Rotulos previstos pelo modelo.
-    """
+def plotar_resultados(
+    historicos,
+    y_tr_real,
+    y_tr_pred,
+    y_te_real,
+    y_te_pred,
+    mostrar_graficos=False,
+):
     cores = ["#2196F3", "#FF9800", "#4CAF50", "#E91E63"]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 5.5))
 
-    # Painel 1: mostra se o custo caiu durante o treinamento.
     for i, hist in enumerate(historicos):
         ax1.semilogy(hist, label=NOMES[i], color=cores[i], linewidth=2)
     ax1.set_title(
@@ -88,43 +107,32 @@ def plotar_resultados(historicos, y_real, y_pred, mostrar_graficos=False):
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
 
-    # Painel 2: compara classes reais e previstas.
-    matriz = matriz_confusao(y_real, y_pred, n=N_CLASSES)
-    im = ax2.imshow(matriz, cmap="Blues")
-    ax2.set_xticks(range(N_CLASSES))
-    ax2.set_yticks(range(N_CLASSES))
-    ax2.set_xticklabels(NOMES, rotation=18, ha="right", fontsize=9)
-    ax2.set_yticklabels(NOMES, fontsize=9)
-    ax2.set_xlabel("Classe Prevista", fontsize=10)
-    ax2.set_ylabel("Classe Real", fontsize=10)
-    ax2.set_title(
-        "Matriz de Confusao - Conjunto de Teste", fontsize=12, fontweight="bold"
+    n_tr = len(y_tr_real)
+    im2 = _desenhar_matriz(
+        ax2,
+        matriz_confusao(y_tr_real, y_tr_pred, n=N_CLASSES),
+        f"Matriz de Confusao - Treino ({n_tr} amostras)",
     )
+    plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
 
-    limiar = matriz.max() / 2 if matriz.size else 0
-    for i in range(N_CLASSES):
-        for j in range(N_CLASSES):
-            ax2.text(
-                j,
-                i,
-                str(matriz[i, j]),
-                ha="center",
-                va="center",
-                fontsize=11,
-                color="white" if matriz[i, j] > limiar else "black",
-            )
+    n_te = len(y_te_real)
+    im3 = _desenhar_matriz(
+        ax3,
+        matriz_confusao(y_te_real, y_te_pred, n=N_CLASSES),
+        f"Matriz de Confusao - Teste ({n_te} amostras)",
+    )
+    plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
 
-    plt.colorbar(im, ax=ax2, fraction=0.046, pad=0.04)
     fig.suptitle(
         "Perceptron - Classificacao de Material em Viga Engastada",
         fontsize=13,
         fontweight="bold",
         y=0.98,
     )
-    fig.subplots_adjust(top=0.84, bottom=0.12, wspace=0.35)
+    fig.subplots_adjust(top=0.84, bottom=0.12, wspace=0.38)
     salvar_ou_mostrar(
         fig,
-        "resultados_perceptron_viga.png",
+        f"{PASTA_RESULTADOS}/resultados_perceptron_viga.png",
         mostrar_graficos=mostrar_graficos,
     )
 
@@ -140,7 +148,7 @@ def plotar_sinais_exemplo(mostrar_graficos=False):
     - e chamada no inicio de `main`;
     - usa `simular_vibracao` e `frequencia_natural` do modulo fisico.
     """
-    t = np.linspace(0, 1.0, 1000)
+    t = np.linspace(0, 3.0, 1000)
     cores = ["#2196F3", "#FF9800", "#4CAF50", "#E91E63"]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 6), sharex=True)
@@ -164,22 +172,11 @@ def plotar_sinais_exemplo(mostrar_graficos=False):
         ax.grid(True, alpha=0.3)
 
     fig.tight_layout(rect=(0, 0, 1, 0.96))
-    salvar_ou_mostrar(fig, "sinais_vibracao.png", mostrar_graficos=mostrar_graficos)
-
-
-def salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=False):
-    """
-    Salva a figura e, opcionalmente, abre a janela interativa.
-
-    Por padrao o script roda de forma nao bloqueante, apenas gerando
-    os arquivos PNG. A exibicao interativa pode ser habilitada via CLI.
-    """
-    fig.savefig(caminho_arquivo, dpi=150, bbox_inches="tight")
-    if mostrar_graficos:
-        plt.show()
-    else:
-        plt.close(fig)
-    print(f"  Grafico salvo em '{caminho_arquivo}'")
+    salvar_ou_mostrar(
+        fig,
+        f"{PASTA_RESULTADOS}/sinais_vibracao.png",
+        mostrar_graficos=mostrar_graficos,
+    )
 
 
 def criar_parser():
@@ -210,6 +207,8 @@ def main(mostrar_graficos=False):
     Esta funcao e o ponto de entrada do projeto quando o arquivo e
     executado diretamente.
     """
+    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+
     print("=" * 58)
     print("  PERCEPTRON - MATERIAL DE VIGA ENGASTADA POR VIBRACAO")
     print("=" * 58)
@@ -217,15 +216,16 @@ def main(mostrar_graficos=False):
     print("\n[0] Gerando sinais de vibracao por material...")
     plotar_sinais_exemplo(mostrar_graficos=mostrar_graficos)
 
-    print("\n[1] Gerando dataset simulado (250 amostras x 4 materiais)...")
-    X, y = gerar_dataset(n_por_classe=250)
+    print(
+        f"\n[1] Gerando dataset simulado ({N_POR_CLASSE} amostras x {N_CLASSES} materiais)..."
+    )
+    X, y = gerar_dataset(n_por_classe=N_POR_CLASSE)
     print(f"    Total: {X.shape[0]} amostras  |  {X.shape[1]} features por amostra")
     print(f"    Features: {', '.join(NOMES_FEATURES)}")
 
-    # Embaralha o dataset e separa treino/teste em 80/20.
     np.random.seed(0)
     idx = np.random.permutation(len(y))
-    corte = int(0.8 * len(y))
+    corte = int(FRACAO_TREINO * len(y))
     X_tr, X_te = X[idx[:corte]], X[idx[corte:]]
     y_tr, y_te = y[idx[:corte]], y[idx[corte:]]
     print(f"\n    Treino: {len(y_tr)} amostras  |  Teste: {len(y_te)} amostras")
@@ -234,18 +234,22 @@ def main(mostrar_graficos=False):
     X_tr_n, X_te_n, _, _ = normalizar(X_tr, X_te)
 
     # Treina um classificador um-contra-todos para cada material.
-    modelos, historicos, historicos_detalhados = treinar_multiclasse_com_historico(
+    modelos, historicos, historicos_detalhados = treinar_multiclasse(
         X_tr_n,
         y_tr,
         nomes=NOMES,
-        delta=1e-3,
-        n_iter=5000,
+        delta=DELTA,
+        n_iter=N_ITER,
     )
 
-    print("\n[3] Avaliando no conjunto de teste...")
+    print("\n[3] Avaliando no conjunto de treino e teste...")
+    y_tr_pred = prever(X_tr_n, modelos)
     y_pred = prever(X_te_n, modelos)
+    acuracia_tr = np.mean(y_tr_pred == y_tr) * 100
     acuracia = np.mean(y_pred == y_te) * 100
-    print(f"\n    Acuracia geral: {acuracia:.1f} %")
+    print(
+        f"\n    Acuracia treino: {acuracia_tr:.1f} %  |  Acuracia teste: {acuracia:.1f} %"
+    )
 
     print("\n    Desempenho por material (conjunto de teste):")
     print(
@@ -271,12 +275,19 @@ def main(mostrar_graficos=False):
     )
 
     print("\n[5] Gerando visualizacoes...")
-    plotar_resultados(historicos, y_te, y_pred, mostrar_graficos=mostrar_graficos)
+    plotar_resultados(
+        historicos,
+        y_tr,
+        y_tr_pred,
+        y_te,
+        y_pred,
+        mostrar_graficos=mostrar_graficos,
+    )
     plotar_metricas(
         historicos_detalhados,
         nomes=NOMES,
         titulo="Metricas do treinamento por classe",
-        caminho_arquivo="metricas_treinamento.png",
+        caminho_arquivo=f"{PASTA_RESULTADOS}/metricas_treinamento.png",
         mostrar_graficos=mostrar_graficos,
     )
 
@@ -286,14 +297,21 @@ def main(mostrar_graficos=False):
             hist_det,
             nomes_features=NOMES_FEATURES,
             titulo=f"Evolucao dos pesos - {nome}",
-            caminho_arquivo=f"evolucao_pesos_{nome_arquivo}.png",
+            caminho_arquivo=f"{PASTA_RESULTADOS}/evolucao_pesos_{nome_arquivo}.png",
             mostrar_graficos=mostrar_graficos,
         )
         plotar_componentes_gradiente(
             hist_det,
             nomes_features=NOMES_FEATURES,
             titulo=f"Componentes do gradiente - {nome}",
-            caminho_arquivo=f"componentes_gradiente_{nome_arquivo}.png",
+            caminho_arquivo=f"{PASTA_RESULTADOS}/componentes_gradiente_{nome_arquivo}.png",
+            mostrar_graficos=mostrar_graficos,
+        )
+        plotar_gradiente_3d(
+            hist_det,
+            nomes_features=NOMES_FEATURES,
+            titulo=f"Gradiente 3D - {nome}",
+            caminho_arquivo=f"{PASTA_RESULTADOS}/gradiente_3d_{nome_arquivo}.png",
             mostrar_graficos=mostrar_graficos,
         )
 
@@ -308,7 +326,7 @@ def main(mostrar_graficos=False):
                 w,
                 nomes_features=NOMES_FEATURES[:2],
                 titulo=f"Fronteira de decisao - {nome} vs resto",
-                caminho_arquivo=f"fronteira_decisao_{nome_arquivo}.png",
+                caminho_arquivo=f"{PASTA_RESULTADOS}/fronteira_decisao_{nome_arquivo}.png",
                 mostrar_graficos=mostrar_graficos,
             )
     else:
@@ -317,7 +335,7 @@ def main(mostrar_graficos=False):
         )
 
     print("\n" + "=" * 58)
-    print("  Concluido. Verifique os arquivos .png gerados.")
+    print(f"  Concluido. Verifique a pasta '{PASTA_RESULTADOS}/'.")
     print("=" * 58)
 
 

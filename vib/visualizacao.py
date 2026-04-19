@@ -1,47 +1,22 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from perceptron import treinar_multiclasse, treinar_perceptron
 
-
-def treinar_com_historico(X_tr, r_tr, delta=1e-3, n_iter=150, nome=""):
+def salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=False):
     """
-    Treina um classificador binario e retorna o historico detalhado.
+    Salva a figura e, opcionalmente, abre a janela interativa.
 
-    O treino continua sendo executado por `perceptron.treinar_perceptron`.
-    Este wrapper apenas habilita a coleta adicional para analise.
+    Por padrao o script roda de forma nao bloqueante, apenas gerando
+    os arquivos PNG. A exibicao interativa pode ser habilitada via CLI.
     """
-    w0, w, _, historico = treinar_perceptron(
-        X_tr,
-        r_tr,
-        delta=delta,
-        n_iter=n_iter,
-        nome=nome,
-        coletar_detalhes=True,
-    )
-    return w0, w, _historico_em_arrays(historico)
+    if caminho_arquivo is not None:
+        fig.savefig(caminho_arquivo, dpi=150, bbox_inches="tight")
+        print(f"  Grafico salvo em '{caminho_arquivo}'")
 
-
-def treinar_multiclasse_com_historico(X_tr, y_tr, nomes=None, delta=1e-3, n_iter=150):
-    """
-    Treina o problema um-contra-todos e retorna historicos completos.
-
-    Retorna
-    -------
-    tuple
-        Modelos treinados, historicos simples de custo e historicos
-        detalhados de cada classificador binario.
-    """
-    modelos, historicos, historicos_detalhados = treinar_multiclasse(
-        X_tr,
-        y_tr,
-        nomes=nomes,
-        delta=delta,
-        n_iter=n_iter,
-        coletar_detalhes=True,
-    )
-    historicos_detalhados = [_historico_em_arrays(hist) for hist in historicos_detalhados]
-    return modelos, historicos, historicos_detalhados
+    if mostrar_graficos:
+        plt.show()
+    elif caminho_arquivo is not None:
+        plt.close(fig)
 
 
 def plotar_metricas(
@@ -85,7 +60,7 @@ def plotar_metricas(
 
     fig.suptitle(titulo, fontsize=12, fontweight="bold")
     fig.tight_layout()
-    _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
     return fig, (ax_custo, ax_grad)
 
 
@@ -127,7 +102,91 @@ def plotar_componentes_gradiente(
     ax.legend(ncol=2 if len(nomes_componentes) <= 5 else 3, fontsize=9)
 
     fig.tight_layout()
-    _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    return fig, ax
+
+
+def plotar_gradiente_3d(
+    historico,
+    nomes_features=None,
+    incluir_vies=True,
+    titulo="Gradiente 3D",
+    caminho_arquivo=None,
+    mostrar_graficos=False,
+    max_epocas=320,
+):
+    """
+    Plota uma superficie 3D do gradiente ao longo das epocas.
+
+    Eixos do grafico:
+    - x: epoca do treinamento;
+    - y: componente do gradiente;
+    - z: valor da derivada parcial.
+
+    Para evitar figuras pesadas demais, o eixo das epocas pode ser
+    reduzido por amostragem uniforme quando o historico e muito longo.
+    """
+    epocas = np.asarray(historico["epocas"])
+    grad_w = np.asarray(historico["grad_w"])
+
+    if grad_w.ndim != 2:
+        raise ValueError("O historico de gradientes precisa ter shape (epocas, n_features).")
+
+    nomes_componentes = _resolver_nomes_features(grad_w.shape[1], nomes_features)
+    rotulos = [f"grad {nome}" for nome in nomes_componentes]
+    gradientes = grad_w.T
+
+    if incluir_vies:
+        grad_w0 = np.asarray(historico["grad_w0"])
+        gradientes = np.vstack((grad_w0[None, :], gradientes))
+        rotulos = ["grad w0"] + rotulos
+
+    epocas_plot, gradientes_plot = _reduzir_epocas_plot_3d(
+        epocas,
+        gradientes,
+        max_epocas=max_epocas,
+    )
+
+    eixo_epocas, eixo_componentes = np.meshgrid(
+        epocas_plot,
+        np.arange(len(rotulos), dtype=float),
+    )
+
+    fig = plt.figure(figsize=(10, 6.5))
+    ax = fig.add_subplot(111, projection="3d")
+    superficie = ax.plot_surface(
+        eixo_epocas,
+        eixo_componentes,
+        gradientes_plot,
+        cmap="viridis",
+        linewidth=0,
+        antialiased=True,
+        alpha=0.92,
+    )
+
+    for indice in range(len(rotulos)):
+        ax.plot(
+            epocas_plot,
+            np.full(epocas_plot.shape, indice, dtype=float),
+            gradientes_plot[indice],
+            color="black",
+            linewidth=0.7,
+            alpha=0.35,
+        )
+
+    ax.set_title(titulo)
+    ax.set_xlabel("Epoca")
+    ax.set_ylabel("Componente")
+    ax.set_zlabel("Valor da derivada")
+    ax.set_yticks(np.arange(len(rotulos), dtype=float))
+    ax.set_yticklabels(rotulos)
+    ax.view_init(elev=28, azim=-128)
+
+    barra = fig.colorbar(superficie, ax=ax, shrink=0.78, pad=0.08)
+    barra.set_label("Gradiente")
+
+    fig.subplots_adjust(left=0.03, right=0.86, bottom=0.06, top=0.92)
+    salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
     return fig, ax
 
 
@@ -168,7 +227,7 @@ def plotar_evolucao_pesos(
     ax.legend(ncol=2 if len(nomes_componentes) <= 5 else 3, fontsize=9)
 
     fig.tight_layout()
-    _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
     return fig, ax
 
 
@@ -234,7 +293,7 @@ def plotar_fronteira_decisao(
     ax.legend()
 
     fig.tight_layout()
-    _salvar_figura(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
+    salvar_ou_mostrar(fig, caminho_arquivo, mostrar_graficos=mostrar_graficos)
     return fig, ax
 
 
@@ -374,22 +433,16 @@ def _resolver_nomes_features(n_features, nomes_features):
     return [f"w{i + 1}" for i in range(n_features)]
 
 
-def _historico_em_arrays(historico):
-    historico_arrays = {}
-    for chave, valores in historico.items():
-        historico_arrays[chave] = np.asarray(valores)
-    return historico_arrays
+def _reduzir_epocas_plot_3d(epocas, gradientes, max_epocas=320):
+    epocas = np.asarray(epocas)
+    gradientes = np.asarray(gradientes)
 
+    if max_epocas is None or len(epocas) <= max_epocas:
+        return epocas, gradientes
 
-def _salvar_figura(fig, caminho_arquivo, mostrar_graficos=False):
-    if caminho_arquivo is not None:
-        fig.savefig(caminho_arquivo, dpi=150, bbox_inches="tight")
-        print(f"  Grafico salvo em '{caminho_arquivo}'")
-
-    if mostrar_graficos:
-        plt.show()
-    elif caminho_arquivo is not None:
-        plt.close(fig)
+    indices = np.linspace(0, len(epocas) - 1, num=max_epocas, dtype=int)
+    indices = np.unique(indices)
+    return epocas[indices], gradientes[:, indices]
 
 
 __all__ = [
@@ -398,7 +451,7 @@ __all__ = [
     "plotar_componentes_gradiente",
     "plotar_evolucao_pesos",
     "plotar_fronteira_decisao",
+    "plotar_gradiente_3d",
     "plotar_metricas",
-    "treinar_com_historico",
-    "treinar_multiclasse_com_historico",
+    "salvar_ou_mostrar",
 ]
