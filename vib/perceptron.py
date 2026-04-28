@@ -283,7 +283,11 @@ def treinar_multiclasse(X_tr, y_tr, nomes=None, delta=1e-3, n_iter=150):
         r_bin = (y_tr == c).astype(int)
 
         w0, w, hist, hist_det = treinar_perceptron(
-            X_tr, r_bin, delta=delta, n_iter=n_iter, nome=nome,
+            X_tr,
+            r_bin,
+            delta=delta,
+            n_iter=n_iter,
+            nome=nome,
         )
         modelos.append((w0, w))
         historicos.append(hist)
