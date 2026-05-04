@@ -1,5 +1,8 @@
 import argparse
+import importlib
+import importlib.util
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,13 +14,6 @@ from vib.modelo_matematico import (
     frequencia_natural,
     gerar_dataset,
     simular_vibracao,
-)
-from vib.perceptron import (
-    matriz_confusao,
-    metricas_por_classe,
-    normalizar,
-    prever,
-    treinar_multiclasse,
 )
 from vib.visualizacao import (
     imprimir_tabela_resumo_treino,
@@ -61,7 +57,51 @@ DELTA = 1e-4
 N_ITER = 10000
 
 
+def carregar_perceptron(tipo):
+    """
+    Carrega o backend de aprendizado escolhido para o experimento.
+
+    `numpy` usa `vib/perceptron.py`.
+    `pytorch` usa `vib/perceptron-pytorch.py`, carregado por caminho porque
+    o hifen no nome do arquivo impede import Python convencional.
+    """
+    if tipo == "numpy":
+        return importlib.import_module("vib.perceptron")
+
+    caminho = Path(__file__).resolve().parent / "vib" / "perceptron-pytorch.py"
+    spec = importlib.util.spec_from_file_location("vib.perceptron_pytorch", caminho)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def _como_numpy(valor):
+    """
+    Converte tensores PyTorch para NumPy quando alguma etapa externa exige.
+
+    O backend PyTorch continua treinando com tensores; esta conversao fica
+    restrita a metricas simples, Matplotlib e funcoes de visualizacao antigas.
+    """
+    if hasattr(valor, "detach"):
+        return valor.detach().cpu().numpy()
+    return np.asarray(valor)
+
+
+def _extrair_parametros_lineares(modelo):
+    """
+    Extrai vies e pesos de um modelo linear em qualquer backend.
+
+    No backend NumPy, o modelo ja e `(w0, w)`.
+    No backend PyTorch, o modelo expõe `parametros_lineares()`.
+    """
+    if hasattr(modelo, "parametros_lineares"):
+        w0, w = modelo.parametros_lineares()
+        return float(_como_numpy(w0)), _como_numpy(w)
+    return modelo
+
+
 def _desenhar_matriz(ax, matriz, titulo):
+    matriz = _como_numpy(matriz)
     im = ax.imshow(matriz, cmap="Blues")
     ax.set_xticks(range(N_CLASSES))
     ax.set_yticks(range(N_CLASSES))
@@ -91,6 +131,7 @@ def plotar_resultados(
     y_tr_pred,
     y_te_real,
     y_te_pred,
+    matriz_confusao_fn,
     mostrar_graficos=False,
 ):
     cores = ["#2196F3", "#FF9800", "#4CAF50", "#E91E63"]
@@ -110,7 +151,7 @@ def plotar_resultados(
     n_tr = len(y_tr_real)
     im2 = _desenhar_matriz(
         ax2,
-        matriz_confusao(y_tr_real, y_tr_pred, n=N_CLASSES),
+        matriz_confusao_fn(y_tr_real, y_tr_pred, n=N_CLASSES),
         f"Matriz de Confusao - Treino ({n_tr} amostras)",
     )
     plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
@@ -118,7 +159,7 @@ def plotar_resultados(
     n_te = len(y_te_real)
     im3 = _desenhar_matriz(
         ax3,
-        matriz_confusao(y_te_real, y_te_pred, n=N_CLASSES),
+        matriz_confusao_fn(y_te_real, y_te_pred, n=N_CLASSES),
         f"Matriz de Confusao - Teste ({n_te} amostras)",
     )
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
@@ -188,10 +229,16 @@ def criar_parser():
         action="store_true",
         help="abre as janelas do Matplotlib apos salvar os arquivos PNG",
     )
+    parser.add_argument(
+        "--perceptron",
+        choices=("numpy", "pytorch"),
+        default="numpy",
+        help="seleciona o backend: perceptron.py (numpy) ou perceptron-pytorch.py",
+    )
     return parser
 
 
-def main(mostrar_graficos=False):
+def main(mostrar_graficos=False, tipo_perceptron="numpy"):
     """
     Orquestra o experimento completo de classificacao.
 
@@ -208,10 +255,12 @@ def main(mostrar_graficos=False):
     executado diretamente.
     """
     os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+    perceptron = carregar_perceptron(tipo_perceptron)
 
     print("=" * 58)
     print("  PERCEPTRON - MATERIAL DE VIGA ENGASTADA POR VIBRACAO")
     print("=" * 58)
+    print(f"  Backend selecionado: perceptron-{tipo_perceptron}")
 
     print("\n[0] Gerando sinais de vibracao por material...")
     plotar_sinais_exemplo(mostrar_graficos=mostrar_graficos)
@@ -231,10 +280,10 @@ def main(mostrar_graficos=False):
     print(f"\n    Treino: {len(y_tr)} amostras  |  Teste: {len(y_te)} amostras")
 
     print("\n[2] Normalizando features (z-score, parametros do treino)...")
-    X_tr_n, X_te_n, _, _ = normalizar(X_tr, X_te)
+    X_tr_n, X_te_n, _, _ = perceptron.normalizar(X_tr, X_te)
 
     # Treina um classificador um-contra-todos para cada material.
-    modelos, historicos, historicos_detalhados = treinar_multiclasse(
+    modelos, historicos, historicos_detalhados = perceptron.treinar_multiclasse(
         X_tr_n,
         y_tr,
         nomes=NOMES,
@@ -243,10 +292,13 @@ def main(mostrar_graficos=False):
     )
 
     print("\n[3] Avaliando no conjunto de treino e teste...")
-    y_tr_pred = prever(X_tr_n, modelos)
-    y_pred = prever(X_te_n, modelos)
-    acuracia_tr = np.mean(y_tr_pred == y_tr) * 100
-    acuracia = np.mean(y_pred == y_te) * 100
+    y_tr_pred = perceptron.prever(X_tr_n, modelos)
+    y_pred = perceptron.prever(X_te_n, modelos)
+    y_tr_pred_np = _como_numpy(y_tr_pred).astype(int)
+    y_pred_np = _como_numpy(y_pred).astype(int)
+    X_tr_n_np = _como_numpy(X_tr_n)
+    acuracia_tr = np.mean(y_tr_pred_np == y_tr) * 100
+    acuracia = np.mean(y_pred_np == y_te) * 100
     print(
         f"\n    Acuracia treino: {acuracia_tr:.1f} %  |  Acuracia teste: {acuracia:.1f} %"
     )
@@ -259,7 +311,7 @@ def main(mostrar_graficos=False):
     print("    " + "-" * 82)
 
     # Resume o desempenho de cada classe separadamente.
-    metricas = metricas_por_classe(y_te, y_pred, n=N_CLASSES)
+    metricas = perceptron.metricas_por_classe(y_te, y_pred, n=N_CLASSES)
     for i, (vp, fn, vn, fp, p_alvo, p_nao_alvo) in enumerate(metricas):
         print(
             f"    {NOMES[i]:<20} {vp:>4} {fn:>4} {vn:>5} {fp:>4}"
@@ -278,9 +330,10 @@ def main(mostrar_graficos=False):
     plotar_resultados(
         historicos,
         y_tr,
-        y_tr_pred,
+        y_tr_pred_np,
         y_te,
-        y_pred,
+        y_pred_np,
+        matriz_confusao_fn=perceptron.matriz_confusao,
         mostrar_graficos=mostrar_graficos,
     )
     plotar_metricas(
@@ -315,12 +368,13 @@ def main(mostrar_graficos=False):
             mostrar_graficos=mostrar_graficos,
         )
 
-    if X_tr_n.shape[1] == 2:
-        for classe, ((w0, w), nome) in enumerate(zip(modelos, NOMES)):
+    if X_tr_n_np.shape[1] == 2:
+        for classe, (modelo, nome) in enumerate(zip(modelos, NOMES)):
+            w0, w = _extrair_parametros_lineares(modelo)
             r_bin = (y_tr == classe).astype(int)
             nome_arquivo = nome.lower().replace(" ", "_")
             plotar_fronteira_decisao(
-                X_tr_n,
+                X_tr_n_np,
                 r_bin,
                 w0,
                 w,
@@ -341,4 +395,4 @@ def main(mostrar_graficos=False):
 
 if __name__ == "__main__":
     args = criar_parser().parse_args()
-    main(mostrar_graficos=args.mostrar_graficos)
+    main(mostrar_graficos=args.mostrar_graficos, tipo_perceptron=args.perceptron)
